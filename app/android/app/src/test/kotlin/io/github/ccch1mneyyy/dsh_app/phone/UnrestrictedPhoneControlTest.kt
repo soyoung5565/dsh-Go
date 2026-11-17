@@ -38,7 +38,7 @@ class UnrestrictedPhoneControlTest {
     @Test fun wechatEveryWriteListNoLongerAsks() {
         val asked = Asked()
         val gate = SafetyGate({ PhonePolicies() }, PhoneTasks(), { asked.gate }, unrestricted = true)
-        val policies = PhoneControlBuildPolicy.effectivePolicies(PhonePolicies())
+        val policies = PhoneControlBuildPolicy.effectivePolicies(PhonePolicies(), unrestricted = true)
         assertTrue(policies.confirmEveryWritePackages.isEmpty())
         assertSame(SafetyGate.Verdict.Allow, gate.checkWrite(WriteKind.TAP, target(), "com.tencent.mm", "微信"))
         assertSame(SafetyGate.Verdict.Allow, gate.checkWrite(WriteKind.TYPE, target(), "com.tencent.mm", "微信", typed = "hi", submit = true))
@@ -129,7 +129,7 @@ class UnrestrictedPhoneControlTest {
         assertEquals(1, dispatches)
 
         val denied = run("root", 0, unrestricted = true)
-        assertEquals(null, denied["started"])
+        assertEquals(false, denied["started"])
         assertEquals("confirmationDenied", denied["errorCode"])
         assertEquals(1, dispatches)
 

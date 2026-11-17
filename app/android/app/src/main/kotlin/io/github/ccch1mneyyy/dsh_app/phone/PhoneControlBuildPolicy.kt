@@ -16,7 +16,7 @@ internal object PhoneControlBuildPolicy {
      * 定制构建的有效策略：不碰名单、每次写入确认名单清空，硬规则三项全部解除。
      * 只放宽“是否询问/拒绝”，任务归属、暂停、锁屏、坐标与上下文校验仍由调用方保留。
      */
-    fun effectivePolicies(base: PhonePolicies): PhonePolicies {
+    fun effectivePolicies(base: PhonePolicies, unrestricted: Boolean = this.unrestricted): PhonePolicies {
         if (!unrestricted) return base
         return base.copy(
             denyPackages = emptyList(),
