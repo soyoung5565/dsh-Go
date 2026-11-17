@@ -76,10 +76,31 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
+      - name: Restore the runtime download cache
+        id: runtime-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: runtime/.cache
+          key: runtime-downloads-v1-${{ hashFiles('runtime/build-runtime.sh', 'runtime/locks/**') }}
+          restore-keys: runtime-downloads-v1-
       - name: Build the arm64 runtime
-        run: bash runtime/build-runtime.sh arm64-v8a
+        run: |
+          UBUNTU_ARCHIVE_ARM64=https://repo.huaweicloud.com/ubuntu-ports \
+            bash runtime/build-runtime.sh arm64-v8a
+      - name: Save the runtime download cache
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: runtime/.cache
+          key: ${{ steps.runtime-cache.outputs.cache-primary-key }}
+      - name: CJK fonts for widget tests
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y fonts-noto-cjk
       - name: Flutter tests
         working-directory: app
+        env:
+          DSH_TEST_FONT_DIR: /usr/share/fonts/opentype/noto
         run: |
           flutter pub get --enforce-lockfile
           flutter analyze --no-pub
