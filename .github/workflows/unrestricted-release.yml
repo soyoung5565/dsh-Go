@@ -120,12 +120,16 @@ jobs:
         run: |
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKM" --licenses >/dev/null 2>&1 || true
-          "$SDKM" "ndk;28.2.13676358"
+          "$SDKM" "ndk;28.2.13676358" >/dev/null
+          cat "$ANDROID_HOME/ndk/28.2.13676358/source.properties"
       - name: Build the unsigned custom APK
         env:
           DSH_UNSIGNED: "1"
           ORG_GRADLE_PROJECT_dshDebuggableRelease: ${{ github.event.inputs.debuggable || 'false' }}
-        run: bash tooling/build-unrestricted-apk.sh
+        run: |
+          # 运行器预装的 NDK 版本不同；tawcroot 必须用固定版本编译。
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+          bash tooling/build-unrestricted-apk.sh
       - uses: actions/upload-artifact@v4
         with:
           name: unrestricted-apk-unsigned
