@@ -113,6 +113,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
+      - name: Install the Gradle init script
+        run: |
+          # Flutter 的 gradle 插件是 included build，它自己的 settings 只认
+          # google()/mavenCentral()，没有 gradlePluginPortal，kotlin("jvm") 插件标记
+          # 解析不到 → 编译 Flutter 插件脚本时满屏 Unresolved reference。
+          # 放进 GRADLE_USER_HOME/init.d，gradle 与 flutter build 都会自动加载。
+          mkdir -p "$GRADLE_USER_HOME/init.d"
+          cp tooling/gradle-init-repositories.gradle "$GRADLE_USER_HOME/init.d/"
       - name: Android unit tests
         working-directory: app/android
         run: gradle --stacktrace :app:testArm64DebugUnitTest
@@ -123,31 +131,60 @@ jobs:
           "$SDKM" "ndk;28.2.13676358" >/dev/null
           cat "$ANDROID_HOME/ndk/28.2.13676358/source.properties"
       - name: Build the unsigned custom APK
+        continue-on-error: true
         env:
           DSH_UNSIGNED: "1"
           ORG_GRADLE_PROJECT_dshDebuggableRelease: ${{ github.event.inputs.debuggable || 'false' }}
         run: |
           # 运行器预装的 NDK 版本不同；tawcroot 必须用固定版本编译。
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+          # Flutter 的 gradle 插件是 included build，它自己的 settings 只认
+          # google()/mavenCentral()，没有 gradlePluginPortal，于是
+          # kotlin("jvm") 插件标记解析不到 → 编译 Flutter 插件脚本时满屏
+          # "Unresolved reference 'JvmTarget' / 'gradlePlugin'"，
+          # 而 flutter build apk 会把它吞成一句 "failed to produce an .apk"。
+          # 把 init script 放进 GRADLE_USER_HOME/init.d，flutter 和 gradle 都会自动加载。
+          mkdir -p "$GRADLE_USER_HOME/init.d"
+          cp tooling/gradle-init-repositories.gradle "$GRADLE_USER_HOME/init.d/"
           bash tooling/build-unrestricted-apk.sh
-      # flutter 的 gradle 包装器会吞掉真正的编译错误，只报 "failed to produce an .apk"。
-      # 直接再跑一次 gradle，把真实错误打出来。
-      - name: Show the real Gradle error
-        if: failure()
+      # flutter build apk 的 Gradle 包装器会吞掉真正的编译错误，只报 "failed to produce an .apk"。
+      # 诊断证明：直接调 Gradle 是 BUILD SUCCESSFUL。所以当上面的路径没产出 APK 时，
+      # 用 flutter 只生成构建配置（dart defines / asset bundle），打包交给 Gradle。
+      - name: Fall back to a direct Gradle build
+        if: always()
         run: |
+          set -uo pipefail
+          if [ -f app/build/app/outputs/flutter-apk/app-arm64-release.apk ]; then
+            echo "[ok] the flutter build already produced the APK"
+            exit 0
+          fi
+          CODE=$(python3 tooling/build_number.py)
+          echo "build number: $CODE"
+          # flutter 只生成配置与 asset bundle，不做 gradle 打包。
+          flutter build apk --config-only --release --flavor arm64 \
+            --target-platform android-arm64 \
+            --build-name 1.1.0 --build-number "$CODE" \
+            --dart-define=DSH_APP_VERSION=1.1.0+$CODE \
+            --dart-define=DSH_UPDATE_REPO=${{ github.repository }} \
+            --dart-define=DSH_UPDATE_MIRROR= \
+            --dart-define=DSH_UPDATE_FEED= \
+            --dart-define=DSH_UPDATE_MIRRORS=
           cd app/android
           ./gradlew assembleArm64Release \
             -PdshUnsignedRelease=true \
             -PunrestrictedPhoneControl=true \
             -PdshDebuggableRelease=${{ github.event.inputs.debuggable || 'false' }} \
-            --stacktrace --no-daemon 2>&1 | tail -80 || true
+            --stacktrace --no-daemon 2>&1 | tail -60 || true
           echo "--- apk outputs ---"
           find app/build -name "*.apk" 2>/dev/null | head -20 || true
-          ls -la ../build/app/outputs/flutter-apk/ 2>/dev/null || true
+          ls -la app/build/outputs/flutter-apk/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: unrestricted-apk-unsigned
-          path: app/build/app/outputs/flutter-apk/app-arm64-release.apk
+          path: |
+            app/build/app/outputs/flutter-apk/app-arm64-release.apk
+            app/build/outputs/apk/arm64/release/app-arm64-release.apk
           if-no-files-found: error
           retention-days: 7
 
