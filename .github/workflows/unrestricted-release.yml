@@ -84,9 +84,12 @@ jobs:
           flutter pub get --enforce-lockfile
           flutter analyze --no-pub
           flutter test test/phone test/update
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
       - name: Android unit tests
         working-directory: app/android
-        run: ./gradlew --stacktrace :app:testArm64DebugUnitTest
+        run: gradle --stacktrace :app:testArm64DebugUnitTest
       - name: Build the unsigned custom APK
         env:
           DSH_UNSIGNED: "1"
