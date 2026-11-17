@@ -172,10 +172,11 @@ jobs:
           rm -f "$RUNNER_TEMP/dshgo.jks"
           "$BUILD_TOOLS/apksigner" verify --verbose --min-sdk-version 26 --print-certs app-arm64-release.apk > certs.txt
           cat certs.txt
-          CERT=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' certs.txt | tr -d '\r')
+          CERT=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' certs.txt | tr -d '\r' | tr 'a-f' 'A-F')
           echo "certificate SHA-256: $CERT"
           test -n "$CERT"
-          if [ -n "${{ vars.UNRESTRICTED_CERT_SHA256 }}" ] && [ "$CERT" != "${{ vars.UNRESTRICTED_CERT_SHA256 }}" ]; then
+          WANT=$(echo "${{ vars.UNRESTRICTED_CERT_SHA256 }}" | tr -d ':' | tr 'a-f' 'A-F')
+          if [ -n "$WANT" ] && [ "$CERT" != "$WANT" ]; then
             echo "certificate changed; refusing to publish"; exit 1
           fi
           sha256sum app-arm64-release.apk > SHA256SUMS
