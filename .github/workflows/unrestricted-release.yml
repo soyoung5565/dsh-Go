@@ -116,6 +116,11 @@ jobs:
       - name: Android unit tests
         working-directory: app/android
         run: gradle --stacktrace :app:testArm64DebugUnitTest
+      - name: Install the NDK the release build needs
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses >/dev/null 2>&1 || true
+          "$SDKM" "ndk;28.2.13676358"
       - name: Build the unsigned custom APK
         env:
           DSH_UNSIGNED: "1"
