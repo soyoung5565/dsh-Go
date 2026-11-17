@@ -130,6 +130,20 @@ jobs:
           # 运行器预装的 NDK 版本不同；tawcroot 必须用固定版本编译。
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
           bash tooling/build-unrestricted-apk.sh
+      # flutter 的 gradle 包装器会吞掉真正的编译错误，只报 "failed to produce an .apk"。
+      # 直接再跑一次 gradle，把真实错误打出来。
+      - name: Show the real Gradle error
+        if: failure()
+        run: |
+          cd app/android
+          ./gradlew assembleArm64Release \
+            -PdshUnsignedRelease=true \
+            -PunrestrictedPhoneControl=true \
+            -PdshDebuggableRelease=${{ github.event.inputs.debuggable || 'false' }} \
+            --stacktrace --no-daemon 2>&1 | tail -80 || true
+          echo "--- apk outputs ---"
+          find app/build -name "*.apk" 2>/dev/null | head -20 || true
+          ls -la ../build/app/outputs/flutter-apk/ 2>/dev/null || true
       - uses: actions/upload-artifact@v4
         with:
           name: unrestricted-apk-unsigned
