@@ -68,9 +68,9 @@ internal class BackgroundCoordinateObservation private constructor(
     companion object {
         fun create(nonce: String, scope: Scope?, window: BackgroundVisualObservation.Window?, context: String?,
                    image: ImageObservation?, complete: Boolean, hasSecrets: Boolean, hasSensitive: Boolean,
-                   now: Long): BackgroundCoordinateObservation? {
+                   now: Long, allowSensitive: Boolean = false): BackgroundCoordinateObservation? {
             if (scope == null || window == null || context == null || image == null ||
-                !complete || hasSecrets || hasSensitive || !image.isFresh(now)) return null
+                !complete || hasSecrets || (hasSensitive && !allowSensitive) || !image.isFresh(now)) return null
             if (window.id < 0 || window.left < 0 || window.top < 0 || window.right <= window.left ||
                 window.bottom <= window.top || window.right > image.geometry.width || window.bottom > image.geometry.height) return null
             return BackgroundCoordinateObservation(nonce, scope, window, context, image)

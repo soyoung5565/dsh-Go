@@ -387,7 +387,8 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
         return true
     }
 
-    override fun policies(): PhonePolicies = policiesCache
+    override fun policies(): PhonePolicies =
+        PhoneControlBuildPolicy.effectivePolicies(policiesCache)
 
     /** Construction only, before any registry/worker can read the published cache. */
     private fun readPolicies(): PhonePolicies {
@@ -415,7 +416,8 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
 
     /** `getPolicies`: the lists, a label for every listed package, and the shipped defaults. */
     fun policiesMap(): Map<String, Any?> {
-        val p = policies()
+        // 展示与写回都用磁盘上的原始设置，定制构建的有效策略不外泄到用户 JSON。
+        val p = policiesCache
         val labels = LinkedHashMap<String, String>()
         for (pkg in (p.denyPackages + p.confirmEveryWritePackages + PhonePolicies().denyPackages + PhonePolicies().confirmEveryWritePackages).distinct()) {
             label(pkg)?.let { labels[pkg] = it }

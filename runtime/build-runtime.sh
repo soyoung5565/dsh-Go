@@ -64,9 +64,10 @@ UBUNTU_MIRROR="https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/ubuntu-base/r
 NODE_MIRROR="https://npmmirror.com/mirrors/node"
 NPM_REGISTRY="https://registry.npmmirror.com"
 TERMUX_REPO="https://packages.termux.dev/apt/termux-main"
-UBUNTU_ARCHIVE_AMD64="https://mirrors.tuna.tsinghua.edu.cn/ubuntu"        # InRelease verified with gpgv
-UBUNTU_ARCHIVE_ARM64="https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports"
-UBUNTU_DEB_FALLBACK="https://launchpad.net/ubuntu/+archive/primary/+files"
+# 镜像可被环境覆盖：清华镜像有时落后于 security 版本，构建时换一个同步完整的镜像即可。
+UBUNTU_ARCHIVE_AMD64="${UBUNTU_ARCHIVE_AMD64:-https://mirrors.tuna.tsinghua.edu.cn/ubuntu}"  # InRelease verified with gpgv
+UBUNTU_ARCHIVE_ARM64="${UBUNTU_ARCHIVE_ARM64:-https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports}"
+UBUNTU_DEB_FALLBACK="${UBUNTU_DEB_FALLBACK:-https://launchpad.net/ubuntu/+archive/primary/+files}"
 PBS_OFFICIAL="https://github.com/astral-sh/python-build-standalone/releases/download"
 PBS_MIRROR="https://registry.npmmirror.com/-/binary/python-build-standalone"
 

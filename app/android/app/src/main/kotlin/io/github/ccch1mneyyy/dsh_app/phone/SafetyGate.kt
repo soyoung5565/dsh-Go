@@ -185,6 +185,7 @@ class SafetyGate(
     private val gate: () -> UserGate?,
     private val ownPackage: String = SafetyRules.OWN_PACKAGE,
     private val uiText: PhoneUiText = PhoneUiText.DEFAULT,
+    private val unrestricted: Boolean = PhoneControlBuildPolicy.unrestricted,
 ) {
     sealed interface Verdict {
         object Allow : Verdict
@@ -211,6 +212,7 @@ class SafetyGate(
         packages.firstNotNullOfOrNull { checkRead(p, it, null) }
 
     private fun checkRead(p: PhonePolicies, pkg: String?, appLabel: String?): Verdict.Refuse? {
+        if (unrestricted) return null
         if (pkg == ownPackage && !p.unlocks.ownApp) return Verdict.Refuse(OWN_APP, "own-app")
         if (pkg != null && pkg in p.denyPackages) return Verdict.Refuse(denied(labelOf(pkg, appLabel)), "deny-list")
         return null
@@ -218,6 +220,7 @@ class SafetyGate(
 
     /** Opening an app (main or background screen). */
     fun checkOpen(pkg: String, appLabel: String?): Verdict.Refuse? {
+        if (unrestricted) return null
         val p = policies()
         // l10n:keep agent safety result
         if (pkg == ownPackage && !p.unlocks.ownApp) return Verdict.Refuse("DSH 自己不需要用 open 打开。", "own-app")
@@ -242,6 +245,7 @@ class SafetyGate(
         visual: VisualTarget? = null,
     ): Verdict {
         val app = labelOf(pkg, appLabel)
+        if (unrestricted) return Verdict.Allow
         if (kind == WriteKind.KEY) return Verdict.Allow // back / home / recents / shade: always a way out
         val p = policies()
         val lifted = p.unlocks
@@ -295,6 +299,7 @@ class SafetyGate(
 
     /** Second, independent question; ordinary App/TASK choices never enter this grant slot. */
     fun checkVisual(action: PhoneAction.TapXY, visual: VisualTarget, owner: PhoneTasks.Owner): Verdict {
+        if (unrestricted) return Verdict.Allow
         val t = visual.target
         val ordinary = checkWrite(WriteKind.TAP_XY, t, t.packageName, t.appLabel,
             coordinate = action, point = action.x to action.y, screen = visual.scope.screen, visual = visual)
@@ -311,10 +316,11 @@ class SafetyGate(
 
     /** Nothing more to ask: 始终免确认, or 本任务免确认 already granted for this task. */
     fun waived(p: PhonePolicies = policies()): Boolean =
-        p.confirmMode == ConfirmMode.ALWAYS || (p.confirmMode == ConfirmMode.TASK && tasks.isWaived)
+        unrestricted || p.confirmMode == ConfirmMode.ALWAYS || (p.confirmMode == ConfirmMode.TASK && tasks.isWaived)
 
     /** A plain confirmation the core needs outside [checkWrite] (moving an app to the background screen). */
     fun confirmation(sentence: String, pkg: String?, appLabel: String?, reason: String): Verdict {
+        if (unrestricted) return Verdict.Allow
         val p = policies()
         if (waived(p)) return Verdict.Allow
         val request = ConfirmRequest(sentence = sentence, appLabel = appLabel ?: pkg, packageName = pkg, firstInApp = false, offerTaskWaiver = p.confirmMode == ConfirmMode.TASK)
@@ -325,7 +331,7 @@ class SafetyGate(
      * This never grants authority over a new target or waives subsequent checks.
      */
     internal fun confirmationOnce(sentence: String, pkg: String?, appLabel: String?, reason: String): Verdict =
-        Verdict.Confirm(ConfirmRequest(sentence = sentence, appLabel = appLabel ?: pkg,
+        if (unrestricted) Verdict.Allow else Verdict.Confirm(ConfirmRequest(sentence = sentence, appLabel = appLabel ?: pkg,
             packageName = pkg, firstInApp = false, offerTaskWaiver = false), pkg, reason, onlyOnce = true)
 
     /** Resolves a verdict, asking the person if needed. InterruptedException means stop. */

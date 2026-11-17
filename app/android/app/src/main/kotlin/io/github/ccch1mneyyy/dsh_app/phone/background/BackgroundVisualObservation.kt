@@ -24,8 +24,10 @@ internal class BackgroundVisualObservation private constructor(
 
     companion object {
         fun create(scope: Scope?, image: ImageObservation?, complete: Boolean,
-            hasSecrets: Boolean, hasSensitive: Boolean, now: Long): BackgroundVisualObservation? {
-            if (scope == null || image == null || !complete || hasSecrets || hasSensitive || !image.isFresh(now)) return null
+            hasSecrets: Boolean, hasSensitive: Boolean, now: Long,
+            allowSensitive: Boolean = false): BackgroundVisualObservation? {
+            if (scope == null || image == null || !complete || hasSecrets || (hasSensitive && !allowSensitive) ||
+                !image.isFresh(now)) return null
             val window = scope.window
             if (window.id < 0 || window.right <= window.left || window.bottom <= window.top) return null
             return BackgroundVisualObservation(scope, image)

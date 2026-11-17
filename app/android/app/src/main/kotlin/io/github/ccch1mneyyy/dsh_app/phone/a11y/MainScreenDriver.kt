@@ -9,6 +9,7 @@ package io.github.ccch1mneyyy.dsh_app.phone.a11y
 
 import io.github.ccch1mneyyy.dsh_app.phone.background.Reasons
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneAppIdentity
+import io.github.ccch1mneyyy.dsh_app.phone.PhoneControlBuildPolicy
 import io.github.ccch1mneyyy.dsh_app.i18n.AppStrings
 import io.github.ccch1mneyyy.dsh_app.R
 import android.app.KeyguardManager
@@ -259,7 +260,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
     private fun ocrAllowed(cap: Capture, snap: Snapshot, gen: Long): Boolean =
         !cancelled(gen) && availability().ok && latest === snap && visual.scope(snap.id) != null &&
             Build.VERSION.SDK_INT >= 34 && cap.windows.size == 1 && cap.visualComplete &&
-            cap.keyboardShown == false && !snap.ownApp && !snap.protectedPage && !snap.hidden &&
+            cap.keyboardShown == false && (PhoneControlBuildPolicy.unrestricted || (!snap.ownApp && !snap.protectedPage)) && !snap.hidden &&
             !cap.truncated && !cap.partial && !unavailable(cap) && secretFieldBounds(cap.windows).isEmpty() &&
             PhoneControl.peek()?.policies()?.denyPackages?.let { snap.packageName != null && snap.packageName !in it } == true
 
@@ -1414,9 +1415,9 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                 val window = cap.windows.singleOrNull()
                 val titles = cap.windows.mapNotNull { it.title } + ProtectedPages.titleTexts(window?.root, cap.screen.height)
                 val known = fresh && published() && cap.visualComplete && window?.kind == WindowKind.APP &&
-                    !cap.ownAppInFront && !cap.systemInFront && cap.keyboardShown == false &&
+                    (!cap.ownAppInFront || PhoneControlBuildPolicy.unrestricted) && !cap.systemInFront && cap.keyboardShown == false &&
                     !unavailable(cap) && secretFieldBounds(cap.windows).isEmpty() &&
-                    !ProtectedPages.isProtected(cap.packageName, titles)
+                    (!ProtectedPages.isProtected(cap.packageName, titles) || PhoneControlBuildPolicy.unrestricted)
                 visual.observed(if (known) cap.visualWindowId else null, if (known) cap.packageName else null)
             }
         } catch (e: Throwable) { visual.observed(null, null); throw e }

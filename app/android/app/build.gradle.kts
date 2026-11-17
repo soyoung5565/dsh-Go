@@ -24,6 +24,24 @@ val runtimeOut = rootProject.file("../../runtime/out")
 // libtawcroot.so for the opt-in tawcroot launch method (runtime/tawcroot/build.py; missing = unavailable).
 val tawcrootOut = rootProject.file("../../runtime/out-tawcroot")
 
+// 免审批定制构建开关，仅由 `-PunrestrictedPhoneControl=true` 打开；默认 false，上游构建行为不变。
+val unrestrictedPhoneControl: String = providers.gradleProperty("unrestrictedPhoneControl")
+    .map {
+        require(it == "true" || it == "false") {
+            "unrestrictedPhoneControl must be true or false"
+        }
+        it
+    }
+    .getOrElse("false")
+// 自动构建把签名交给独立 job 时打开，release 不回落 debug 签名；默认行为不变。
+val dshUnsignedRelease: Boolean = providers.gradleProperty("dshUnsignedRelease")
+    .map { it == "true" }
+    .getOrElse(false)
+// 数据迁移兜底：显式 -PdshDebuggableRelease=true 时让 release 可 run-as，默认关闭。
+val dshDebuggableRelease: Boolean = providers.gradleProperty("dshDebuggableRelease")
+    .map { it == "true" }
+    .getOrElse(false)
+
 // versionCode is the build minute, same encoding as tooling/build_number.py:
 // (year - 2026) * 10^8 + MMDDhhmm at UTC+8. tooling/build-apk.sh passes it as
 // --build-number; this covers builds that skip the script (flutter run, the
@@ -43,6 +61,10 @@ android {
     useLibrary("android.test.runner")
     ndkVersion = flutter.ndkVersion
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -57,6 +79,8 @@ android {
         targetSdk = 28
         versionCode = flutter.versionCode.takeIf { it > 1 } ?: buildMinuteVersionCode()
         versionName = flutter.versionName
+        // 免审批定制的唯一编译期开关；标准构建恒为 false。
+        buildConfigField("boolean", "UNRESTRICTED_PHONE_CONTROL", unrestrictedPhoneControl)
     }
 
     flavorDimensions += "abi"
@@ -131,7 +155,11 @@ android {
         }
         release {
             // Use the release key when configured; local builds without key.properties fall back to debug.
-            signingConfig = signingConfigs.getByName(if (keyProps.isEmpty) "debug" else "release")
+            // dshUnsignedRelease 留给独立签名 job：不配置签名，产物保持未签名。
+            if (!dshUnsignedRelease) {
+                signingConfig = signingConfigs.getByName(if (keyProps.isEmpty) "debug" else "release")
+            }
+            if (dshDebuggableRelease) isDebuggable = true
             // Ours on top of Flutter's: phone control's privileged process and
             // its TLS libraries are reached by class name (see the file).
             proguardFiles("proguard-rules.pro")

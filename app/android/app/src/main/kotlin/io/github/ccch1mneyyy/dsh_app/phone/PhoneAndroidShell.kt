@@ -45,7 +45,8 @@ object PhoneAndroidShell {
 
     fun run(request: Request, owner: PhoneTasks.Owner, tasks: PhoneTasks, scope: SerialWorker.Scope,
             executor: PhoneShellExecutor?, enabled: () -> Boolean, locked: () -> Boolean,
-            gate: () -> UserGate?, ui: PhoneUiText): Map<String, Any?> {
+            gate: () -> UserGate?, ui: PhoneUiText,
+            unrestricted: Boolean = PhoneControlBuildPolicy.unrestricted): Map<String, Any?> {
         fun live() = tasks.isCurrent(owner) && !tasks.isPaused && enabled() && !locked() &&
             !Thread.currentThread().isInterrupted
         if (locked()) return failure("locked")
@@ -54,6 +55,8 @@ object PhoneAndroidShell {
         return executor.execute(owner.taskId, request.command, request.timeoutMs, ::live) { backend, uid ->
             if (!live()) Decision.STOP
             else if (!(backend == "adb" && uid == 2000 || backend == "shizuku" && uid in setOf(0, 2000))) Decision.DENY
+            // 定制构建只移除人工审批；后端与真实 UID 校验、参数与超时上限仍在上面。
+            else if (unrestricted) Decision.ALLOW_ONCE
             else {
                 val prompt = ConfirmRequest(
                     ui.get("phone_shell_confirm",

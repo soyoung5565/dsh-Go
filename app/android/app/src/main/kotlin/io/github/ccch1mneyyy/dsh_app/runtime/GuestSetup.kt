@@ -137,7 +137,7 @@ object GuestSetup {
                     "手机相册、下载等用户文件不在这个环境里，看不到；如需访问，请用户在 App 设置里打开「访问手机文件」。"
                 },
             ) + (if (visualReplies) DSH_UI_SECTION else "") +
-                (if (phoneControl) PhoneGuest.AGENTS_SECTION else "") +
+                (if (phoneControl) PhoneGuest.agentsSection() else "") +
                 DIAGNOSTICS_SECTION.replace(
                     "{PATH}",
                     if (directEngine) "${rootfs.canonicalPath}/root/.dsh/dsh-app/diagnostics.md"

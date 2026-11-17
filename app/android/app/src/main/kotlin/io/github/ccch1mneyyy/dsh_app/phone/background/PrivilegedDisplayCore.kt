@@ -34,6 +34,7 @@ import android.os.Process
 import android.os.SystemClock
 import android.os.Trace
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneAppIdentity
+import io.github.ccch1mneyyy.dsh_app.phone.PhoneControlBuildPolicy
 import android.text.InputType
 import android.util.SparseArray
 import android.view.Display
@@ -73,6 +74,9 @@ class PrivilegedDisplayCore internal constructor(
     private val trees: PrivilegedTreeAccess,
     private val hosted: HostedScope? = null,
 ) {
+
+    /** 免审批定制：敏感词不再阻止后台坐标操作；秘密字段（密码/验证码/支付）仍全部拒绝。 */
+    private val unrestricted: Boolean get() = PhoneControlBuildPolicy.unrestricted
 
     // Guarded by lock, one recent frame only; never a permission to drive coordinates.
     private var visualObservation: BackgroundVisualObservation? = null
@@ -534,7 +538,7 @@ class PrivilegedDisplayCore internal constructor(
             val patternBounds = evidence.patternBounds
             if (!tree.complete) throw Fault("targetUnavailable")
             if (windowId == null || windowId != targetSnapshot?.windowId || !evidence.targetMatched ||
-                tree.hasSecrets || tree.hasSensitive || editor == null || editorBounds?.inside(width, height) != true ||
+                tree.hasSecrets || (tree.hasSensitive && !unrestricted) || editor == null || editorBounds?.inside(width, height) != true ||
                 patternBounds?.inside(width, height) != true) throw Fault("targetChanged")
             if (!evidence.counterMatched || !evidence.textMatched) throw Fault("targetReadbackMismatch")
             if (patternBounds.width < TargetFramePattern.GRID_COLUMNS * TargetFramePattern.MIN_CELL_PX ||
@@ -643,7 +647,7 @@ class PrivilegedDisplayCore internal constructor(
         val usable = button != null && bounds != null && !bounds.isEmpty && bounds.left >= 0 && bounds.top >= 0 &&
             bounds.right <= width && bounds.bottom <= height && button.flags and Proto.FLAG_CLICKABLE != 0
         val matched = tree.complete && tree.targetWindowId != null && (windowId == null || tree.targetWindowId == windowId) &&
-            evidence.targetMatched && !tree.hasSecrets && usable && (!c2 || !tree.hasSensitive && evidence.textMatched &&
+            evidence.targetMatched && !tree.hasSecrets && usable && (!c2 || (!tree.hasSensitive || unrestricted) && evidence.textMatched &&
                 evidence.editorBounds?.inside(width, height) == true && evidence.patternBounds?.inside(width, height) == true)
         response?.putBoolean(Proto.TARGET_MATCHED, matched)
         response?.putBoolean(Proto.TREE_COMPLETE, tree.complete)
@@ -1065,7 +1069,8 @@ class PrivilegedDisplayCore internal constructor(
         if (coordinates && wantImage && response.containsKey("imageBytes")) {
             val candidate = BackgroundCoordinateObservation.create(UUID.randomUUID().toString(), scopeNow,
                 tree?.visualWindow, tree?.coordinateContext(), shot?.local, tree?.complete == true,
-                tree?.hasSecrets != false, tree?.hasSensitive != false, SystemClock.uptimeMillis())
+                tree?.hasSecrets != false, tree?.hasSensitive != false, SystemClock.uptimeMillis(),
+                allowSensitive = unrestricted)
             if (candidate != null) {
                 coordinateObservation = candidate
                 coordinateReceipt(candidate, response)
@@ -1073,7 +1078,7 @@ class PrivilegedDisplayCore internal constructor(
         }
         if (coordinatePost != null) {
             response.putString(Proto.VISUAL_CHANGE, coordinatePost.change(scopeNow, tree?.visualWindow,
-                shot?.local, tree != null && tree.complete && !tree.hasSecrets && !tree.hasSensitive, SystemClock.uptimeMillis()))
+                shot?.local, tree != null && tree.complete && !tree.hasSecrets && (!tree.hasSensitive || unrestricted), SystemClock.uptimeMillis()))
         }
         if (localVisual && tree != null) {
             val vd = display
@@ -1083,7 +1088,7 @@ class PrivilegedDisplayCore internal constructor(
             } else null
             visualObservation = BackgroundVisualObservation.create(scope, shot?.local,
                 tree.complete && tree.elements.count { it.label.isNotEmpty() } >= 5,
-                tree.hasSecrets, tree.hasSensitive, SystemClock.uptimeMillis())
+                tree.hasSecrets, tree.hasSensitive, SystemClock.uptimeMillis(), allowSensitive = unrestricted)
         }
         response.putBoolean(Proto.COORDINATE_SCOPE_KNOWN, tree?.complete == true && tree.visualWindow != null)
         val elements = tree?.elements.orEmpty()
@@ -1503,7 +1508,7 @@ class PrivilegedDisplayCore internal constructor(
                 tree.coordinateNodes?.let { nodes ->
                     val b = tree.visualWindow
                     if (b != null) tree.eligibleNodes = VisualTargets.eligible(nodes,
-                        VisualBounds(b.left, b.top, b.right, b.bottom), tree.complete && !tree.hasSecrets && !tree.hasSensitive)
+                        VisualBounds(b.left, b.top, b.right, b.bottom), tree.complete && !tree.hasSecrets && (!tree.hasSensitive || unrestricted))
                 }
                 return tree
             } catch (e: Throwable) {
@@ -1735,7 +1740,7 @@ class PrivilegedDisplayCore internal constructor(
         val tree = readTree(displayId(), pkg, scanOtherWindows = true, inspectVisual = true, coordinates = true)
         // The scope is the app the observation was taken from; another app on top fails its match below.
         val scope = coordinateScope(shownApp()?.identity) ?: throw Fault("foregroundChanged", foregroundPackage())
-        if (!tree.complete || tree.hasSecrets || tree.hasSensitive ||
+        if (!tree.complete || tree.hasSecrets || (tree.hasSensitive && !unrestricted) ||
             !observed.matches(scope, tree.visualWindow, tree.coordinateContext(), geometry, SystemClock.uptimeMillis()))
             throw Fault("targetChanged")
         // The complete tree transaction has already unregistered. Recheck the real target before dispatch.
@@ -1810,7 +1815,7 @@ class PrivilegedDisplayCore internal constructor(
         val read = NavigationRead()
         try {
             val tree = readTree(automation, displayId(), expected.packageName, inspectVisual = true, navigation = read)
-            if (!tree.complete || tree.hasSecrets || tree.hasSensitive || read.nodes.isEmpty()) throw Fault("targetUnavailable")
+            if (!tree.complete || tree.hasSecrets || (tree.hasSensitive && !unrestricted) || read.nodes.isEmpty()) throw Fault("targetUnavailable")
             val window = tree.visualWindow ?: throw Fault("targetUnavailable")
             read.observation = io.github.ccch1mneyyy.dsh_app.phone.a11y.MarkorNavigation.inspect(listOf(read.window(window)), labels)
                 ?: throw Fault("targetUnavailable")

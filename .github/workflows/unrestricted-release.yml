@@ -1,0 +1,173 @@
+# 免审批定制版的自动构建/签名/发布。上游发布新 tag 后运行，或手动触发。
+#
+# 职责隔离（见 docs/unrestricted-build.md）：
+#   build   只读仓库，产出未签名 APK，碰不到私钥；
+#   sign    只下载 artifact，用固定 keystore 签名并校验证书摘要；
+#   publish 只上传已验证的资产。
+name: Unrestricted release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 上游 tag，如 v1.1.0（必须已 fetch 到本仓库）
+        required: true
+      publish:
+        description: 签名验证通过后创建/更新 Release
+        type: boolean
+        default: false
+  repository_dispatch:
+    types: [upstream-release]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unrestricted-${{ github.event.inputs.tag || github.event.client_payload.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: 3.47.7
+  NODE_VERSION: 24.22.1
+  GRADLE_VERSION: 9.3.1
+  TZ: Asia/Shanghai
+  DSH_RELEASE_REPO: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Fetch the upstream tag
+        if: ${{ github.event.inputs.tag }}
+        run: |
+          git remote add upstream https://github.com/ccch1mneyyy/dsh-Go.git
+          git fetch --no-tags upstream "refs/tags/${{ github.event.inputs.tag }}:refs/tags/${{ github.event.inputs.tag }}"
+          git checkout "${{ github.event.inputs.tag }}"
+      - name: Key anchors still exist
+        run: |
+          set -eu
+          for f in \
+            app/android/app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/phone/SafetyGate.kt \
+            app/android/app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/phone/PhoneControlBuildPolicy.kt \
+            app/android/app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/phone/PhoneAndroidShell.kt \
+            app/lib/update/update_config.dart; do
+            test -f "$f" || { echo "missing $f"; exit 1; }
+          done
+          grep -q "confirmationOnce" app/android/app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/phone/SafetyGate.kt
+          grep -q "UNRESTRICTED_PHONE_CONTROL" app/android/app/build.gradle.kts
+          grep -q "DSH_UPDATE_REPO" app/lib/update/update_config.dart
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Build the arm64 runtime
+        run: bash runtime/build-runtime.sh arm64-v8a
+      - name: Flutter tests
+        working-directory: app
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter analyze --no-pub
+          flutter test test/phone test/update
+      - name: Android unit tests
+        working-directory: app/android
+        run: ./gradlew --stacktrace :app:testArm64DebugUnitTest
+      - name: Build the unsigned custom APK
+        env:
+          DSH_UNSIGNED: "1"
+        run: bash tooling/build-unrestricted-apk.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unrestricted-apk-unsigned
+          path: app/build/app/outputs/flutter-apk/app-arm64-release.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  sign:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: unrestricted-apk-unsigned
+          path: unsigned
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Sign with the persistent custom key
+        env:
+          KEYSTORE_B64: ${{ secrets.UNRESTRICTED_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.UNRESTRICTED_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.UNRESTRICTED_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.UNRESTRICTED_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_B64" || { echo "no keystore secret"; exit 1; }
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/dshgo.jks"
+          BUILD_TOOLS=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BUILD_TOOLS/zipalign" -p -f 4 unsigned/app-arm64-release.apk aligned.apk
+          "$BUILD_TOOLS/apksigner" sign --ks "$RUNNER_TEMP/dshgo.jks" \
+            --ks-pass "pass:$STORE_PASS" --ks-key-alias "$KEY_ALIAS" --key-pass "pass:$KEY_PASS" \
+            --min-sdk-version 26 --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+            --out app-arm64-release.apk aligned.apk
+          rm -f "$RUNNER_TEMP/dshgo.jks"
+          "$BUILD_TOOLS/apksigner" verify --verbose --min-sdk-version 26 --print-certs app-arm64-release.apk > certs.txt
+          cat certs.txt
+          CERT=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' certs.txt | tr -d '\r')
+          echo "certificate SHA-256: $CERT"
+          test -n "$CERT"
+          if [ -n "${{ vars.UNRESTRICTED_CERT_SHA256 }}" ] && [ "$CERT" != "${{ vars.UNRESTRICTED_CERT_SHA256 }}" ]; then
+            echo "certificate changed; refusing to publish"; exit 1
+          fi
+          sha256sum app-arm64-release.apk > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unrestricted-apk-signed
+          path: |
+            app-arm64-release.apk
+            SHA256SUMS
+            certs.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [build, sign]
+    if: ${{ github.event.inputs.publish == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: unrestricted-apk-signed
+          path: dist
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -eu
+          gh release view "$TAG" >/dev/null 2>&1 && EDIT=--clobber || EDIT=
+          gh release create "$TAG" dist/* --repo "${{ github.repository }}" \
+            --title "DSH Go $TAG (unrestricted)" \
+            --notes "免审批定制构建；签名与上一版一致，可覆盖安装保留数据。" $EDIT

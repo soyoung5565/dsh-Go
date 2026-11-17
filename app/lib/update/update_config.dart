@@ -20,8 +20,13 @@
 ///   replaces the public GitHub accelerator list (empty string = none).
 library;
 
-/// GitHub repository the releases live in.
-const updateRepo = 'ccch1mneyyy/dsh-go';
+/// GitHub repository the releases live in. A custom build passes
+/// `--dart-define=DSH_UPDATE_REPO=<owner>/<repo>` so the app never offers the
+/// official APK over a differently signed build.
+const updateRepo = String.fromEnvironment(
+  'DSH_UPDATE_REPO',
+  defaultValue: 'ccch1mneyyy/dsh-go',
+);
 
 /// `releases/latest` of the REST API: tag, notes, assets with sizes and
 /// SHA-256 digests. Unauthenticated: 60 requests per hour per IP.

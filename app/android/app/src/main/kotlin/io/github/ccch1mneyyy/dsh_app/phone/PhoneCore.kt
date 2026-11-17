@@ -53,9 +53,10 @@ class PhoneCore(
     private val onExecution: (PhoneTasks.Owner) -> (((() -> Unit) -> Boolean)?) = { owner ->
         { update -> tasks.runIfCurrent(owner, update) }
     },
+    private val unrestricted: Boolean = PhoneControlBuildPolicy.unrestricted,
 ) {
     private val ui: PhoneUiText get() = env.uiText()
-    val safety = SafetyGate(env::policies, tasks, env::gate, uiText = env.uiText())
+    val safety = SafetyGate(env::policies, tasks, env::gate, uiText = env.uiText(), unrestricted = unrestricted)
 
     // An abandoned body may overlap a later execution of the same Owner. Keep its display
     // serial with that body, not a mutable Core-wide field or a fresh lookup when say runs.
@@ -400,7 +401,7 @@ class PhoneCore(
         // Arbitrary system effects cannot become an implicitly verified UI replay route.
         skillTrace.markIncomplete(owner, PhoneTaskTrace.Gap.UNCERTAIN_RESULT)
         val result = PhoneAndroidShell.run(request, owner, tasks, scope, env.androidShell(),
-            env::enabled, env::isLocked, env::gate, ui)
+            env::enabled, env::isLocked, env::gate, ui, unrestricted = unrestricted)
         val successfulExit = when (val code = result["exitCode"]) {
             is Int -> code == 0
             is Long -> code == 0L
@@ -607,7 +608,11 @@ class PhoneCore(
         if (!current(owner)) return stoppedAfterSystem(r, summary)
         if (r.ok && !tasks.setAppIfCurrent(owner, r.appLabel)) return stoppedAfterSystem(r, summary)
         var reviewNote = ""
-        if (r.requiresReview) {
+        if (r.requiresReview && unrestricted) {
+            skillTrace.markIncomplete(owner)
+            // 定制构建不请用户核对；执行结果仍未知，必须留在回话里，不能伪报成功。
+            reviewNote = "\n" + ui.get("phone_system_review_self", "已尝试原请求但结果未确认；不会重复派发，请以当前界面为准。") // l10n:keep test default
+        } else if (r.requiresReview) {
             skillTrace.markIncomplete(owner)
             val unavailable = ui.get("phone_system_review_unavailable", "无法提供人工核对入口。原请求已尝试，不会重复派发；请直接查看目标界面。") // l10n:keep test default
             val gate = env.gate() ?: return Out(r.message + "\n" + unavailable,
@@ -1008,7 +1013,7 @@ class PhoneCore(
             val pkg = target.packageName
             val app = target.appLabel ?: pkg
             if (!current(owner)) return stoppedOut(summary)
-            if (target.screenId != sid || !target.isEditable || SafetyRules.isSecretTarget(target))
+            if (target.screenId != sid || !target.isEditable || (SafetyRules.isSecretTarget(target) && !unrestricted))
                 return Out("原焦点不是可用的普通输入框，未输入。密码、验证码及支付框请用户填写。", // l10n:keep agent focus result
                     error = true, app = app, summary = summary, decision = "refused:secret-field")
             fun verdict() = safety.checkWrite(WriteKind.TYPE, target, pkg, target.appLabel,
