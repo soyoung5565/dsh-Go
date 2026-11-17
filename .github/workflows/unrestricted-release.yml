@@ -16,6 +16,10 @@ on:
         description: 签名验证通过后创建/更新 Release
         type: boolean
         default: false
+      debuggable:
+        description: 生成可 adb run-as 的迁移用 release（装完可再覆盖成普通版）
+        type: boolean
+        default: false
   repository_dispatch:
     types: [upstream-release]
 
@@ -115,6 +119,7 @@ jobs:
       - name: Build the unsigned custom APK
         env:
           DSH_UNSIGNED: "1"
+          ORG_GRADLE_PROJECT_dshDebuggableRelease: ${{ github.event.inputs.debuggable || 'false' }}
         run: bash tooling/build-unrestricted-apk.sh
       - uses: actions/upload-artifact@v4
         with:
